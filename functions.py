@@ -3,6 +3,7 @@ import html5lib
 import requests
 
 
+'''
 def get_data():
     """ Example data fetch function, rewrite your own! """
     data = []
@@ -25,3 +26,24 @@ def get_data():
         data.append(item)
 
     return data
+'''
+
+
+def get_data(url):
+    html = requests.get(url).text
+    soup = BeautifulSoup(html, "html5lib")
+    items = []
+    for item in soup.find_all("a", class_="item_row_flex"):
+        if "nohistory" in item["class"] or item.find("span"):
+            continue
+
+        price_element = item.find("p", class_="list_price ineuros")
+        price = price_element.text.replace(" ", "")[:-1]
+        url = item.get("href")
+        message = "Uusi löytö hintaan {}\n{}".format(price or 'ilmainen', url)
+        items.append({
+            "identifier": url,
+            "message": message
+        })
+    return items
+

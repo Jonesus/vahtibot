@@ -1,5 +1,6 @@
 import requests
 import time
+import random
 
 # Get ID from @BotFather and create a file called config.py
 # with a single line 'BOT_ID = {your bot ID}'
@@ -14,10 +15,13 @@ from functions import get_data
 
 DB_FILENAME = "db.txt"        # Where to save gathered data identifiers
 CHATS_FILENAME = "chats.txt"  # Where to save subscribed chats
-SLEEP = 30                    # Time to wait between data fetches
+QUERIES_FILENAME = "queries.txt"
+SLEEP = 30                   # Time to wait between data fetches
+VARIANCE = 30
 
 DB = []                       # Database in memory
 CHATS = []                    # Subscribed chat list in memory
+QUERIES = []
 
 
 ########################################
@@ -65,13 +69,16 @@ def get_updates(offset=0):
         raise Exception("ERROR: Failed to get updates!")
 
 
-def poll_new_chats(chats):
+def poll_new_chats(chats, queries, db):
     """ See if any new chats subscribed or unsubscribed for updates """
     updates = get_updates()  # Get all fresh updates
 
     current_offset = 0
     for update in updates:
-        message = update["message"]["text"]
+        try:
+            message = update["message"]["text"]
+        except KeyError:
+            continue
         chat_id = str(update["message"]["chat"]["id"])
         current_offset = update["update_id"]
 
@@ -85,6 +92,31 @@ def poll_new_chats(chats):
             chats.remove(chat_id)
             send_message("I will stop spamming you :(", chat_id)
             print("INFO: Removed chat {}".format(chat_id))
+        elif message.startswith("/add"):
+            query = message.split()[1]
+            if query in queries:
+                continue
+            append_file(QUERIES_FILENAME, query)
+            queries.append(query)
+
+            items = get_data(query)
+            for item in items:
+                identifier = item["identifier"]
+                if identifier not in db:
+                    db.append(identifier)
+                    append_file(DB_FILENAME, identifier)
+
+            send_message("Added query for {}".format(query), chat_id)
+            print("INFO: Added query {}".format(query))
+        elif message.startswith("/remove"):
+            query = message.split()[1]
+            if query not in queries:
+                continue
+            remove_from_file_file(QUERIES_FILENAME, query)
+            queries.remove(query)
+            send_message("Removed query {}".format(query), chat_id)
+            print("INFO: Removed query {}".format(query))
+
 
     get_updates(current_offset)  # Mark processed updates done
 
@@ -93,11 +125,12 @@ def send_message(text, chat):
     """ Send a text message to chat """
     response = requests.post(
         url="https://api.telegram.org/bot{}/sendMessage".format(BOT_ID),
-        data={"chat_id": chat, "text": text, "parse_mode": "Markdown"}
+        data={"chat_id": chat, "text": text}
     ).json()
     if response["ok"]:
         return response
     else:
+        print(response)
         raise Exception("ERROR: Failed to send message!")
 
 
@@ -110,31 +143,35 @@ def main():
     print("INFO: Initializing...")
     DB = load_file(DB_FILENAME)
     CHATS = load_file(CHATS_FILENAME)
+    QUERIES = load_file(QUERIES_FILENAME)
 
     # Initiate main loop
     while True:
         print("INFO: Polling for chat additions or removals...")
-        poll_new_chats(CHATS)
+        poll_new_chats(CHATS, QUERIES, DB)
 
         print("INFO: Fetching fresh data...")
-        items = get_data()
-
-        print("INFO: Processing data...")
-        for item in items:
-            identifier = item["identifier"]
-            message = item["message"]
-
-            if identifier not in DB:
-                print("INFO: Sending messages...")
-                for chat in CHATS:
-                    send_message(message, int(chat))
-                    time.sleep(1)
-
-                append_file(DB_FILENAME, identifier)
-                DB.append(identifier)
-
-        print("INFO: Sleeping for {} secs...".format(SLEEP))
-        time.sleep(SLEEP)
+        for query in QUERIES:
+            items = get_data(query)
+    
+            print("INFO: Processing data for {}...".format(query))
+            for item in items:
+                identifier = item["identifier"]
+                message = item["message"]
+    
+                if identifier not in DB:
+                    print("INFO: Sending messages...")
+                    for chat in CHATS:
+                        send_message(message, int(chat))
+                        time.sleep(1)
+    
+                    append_file(DB_FILENAME, identifier)
+                    DB.append(identifier)
+    
+            sleep_duration = SLEEP + random.randint(0, VARIANCE)
+            print("INFO: Sleeping for {} secs...".format(sleep_duration))
+            time.sleep(sleep_duration)
+        time.sleep(10)
 
 
 if __name__ == "__main__":

@@ -3,4 +3,5 @@ config.py
 
 chats.txt
 db.txt
+queries.txt
 
